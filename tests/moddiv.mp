@@ -1,0 +1,21 @@
+# // truncates toward zero, % matches (sign of dividend) — NOT Python floor
+# expect: 3
+# expect: -3
+# expect: -3
+# expect: 3
+# expect: 1
+# expect: -1
+# expect: 1
+# expect: -1
+# expect: 3
+# expect: 1
+print(7 // 2)
+print(-7 // 2)
+print(7 // -2)
+print(-7 // -2)
+print(7 % 2)
+print(-7 % 2)
+print(7 % -2)
+print(-7 % -2)
+print(10 // 3)
+print(10 % 3)

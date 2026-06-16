@@ -1,0 +1,11 @@
+# Reference material and internal spec — not part of the published repo.
+ref/
+CLAUDE.md
+
+# Build artifacts
+*.o
+minipy
+
+# Local tooling / OS noise
+.claude/
+.DS_Store
