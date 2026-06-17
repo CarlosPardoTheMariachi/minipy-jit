@@ -1,12 +1,14 @@
-// main.cc — driver.  Phase 1: only --dump-tokens exists yet.
+// main.cc — driver.  Phase 2: --dump-tokens and --dump-ast exist so far.
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "ast.h"
 #include "error.h"
 #include "lexer.h"
+#include "parser.h"
 
 namespace {
 
@@ -35,10 +37,12 @@ void dump_tokens(const std::vector<minipy::Token>& toks) {
 int main(int argc, char** argv) {
     std::string path;
     bool opt_dump_tokens = false;
+    bool opt_dump_ast = false;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--dump-tokens") opt_dump_tokens = true;
+        else if (a == "--dump-ast") opt_dump_ast = true;
         else if (!a.empty() && a[0] == '-') {
             std::cerr << "error: unknown flag " << a << "\n";
             return 1;
@@ -47,7 +51,7 @@ int main(int argc, char** argv) {
         }
     }
     if (path.empty()) {
-        std::cerr << "usage: minipy --dump-tokens file.mp\n";
+        std::cerr << "usage: minipy [--dump-tokens|--dump-ast] file.mp\n";
         return 1;
     }
 
@@ -55,7 +59,11 @@ int main(int argc, char** argv) {
     try {
         std::vector<minipy::Token> toks = minipy::lex(src);
         if (opt_dump_tokens) { dump_tokens(toks); return 0; }
-        std::cerr << "error: only --dump-tokens is implemented so far\n";
+
+        minipy::Program prog = minipy::parse(toks);
+        if (opt_dump_ast) { minipy::dump_ast(prog, std::cout); return 0; }
+
+        std::cerr << "error: only --dump-tokens and --dump-ast are implemented so far\n";
         return 1;
     } catch (const minipy::CompileError& e) {
         std::cerr << path << ":" << e.line << ": error: " << e.what() << "\n";
