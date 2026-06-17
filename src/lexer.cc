@@ -69,38 +69,42 @@ std::vector<Token> lex(const std::string& src) {
     std::vector<int> indents{0};  // indentation stack; 0 = top level
     bool at_line_start = true;
 
-    auto push = [&](Tok k, std::string text = "") {
-        toks.push_back(Token{k, std::move(text), 0, line});
-    };
-    auto peek = [&](size_t k) -> char { return i + k < n ? src[i + k] : '\0'; };
-
     while (i < n) {
-        // --- Start of a physical line: run the off-side rule. ---
+
         if (at_line_start) {
+            // We're at the beginning of the line so we need to handle any indentation through spaces first
             size_t j = i;
             int width = 0;
+            // count all white spaces
             while (j < n && (src[j] == ' ' || src[j] == '\t')) {
                 if (src[j] == '\t')
                     throw CompileError(line, "tab character in indentation");
                 width++;
                 j++;
             }
-            // Blank or comment-only line: no tokens at all, no indent logic.
-            if (j >= n || src[j] == '\n' || src[j] == '#') {
+
+            bool end_of_file = j >= n ? true: false;
+            if (end_of_file || src[j] == '\n' || src[j] == '#') {
+                // If we reach this, it means this line is a useless line so just keep goign 
+                // through it and update bookeeing
+                // Skip comment text to the newline (no-op for blank line / EOF).
                 while (j < n && src[j] != '\n') j++;
+                // Consume the '\n' and bump line (skipped if we hit EOF with no newline).
                 if (j < n) { j++; line++; }
                 i = j;
-                continue;
+                continue; // finish useless line 
             }
-            // Real logical line: reconcile width against the stack top.
+            // Decide which possible indentation token to emit since this 
+            // is clearly a line with actual code afte the indentation
+            // and not a useless line
             i = j;
             if (width > indents.back()) {
                 indents.push_back(width);
-                push(Tok::Indent);
+                toks.push_back(Token{Tok::Indent, "", 0, line});
             } else {
                 while (width < indents.back()) {
                     indents.pop_back();
-                    push(Tok::Dedent);
+                    toks.push_back(Token{Tok::Dedent, "", 0, line});
                 }
                 if (width != indents.back())
                     throw CompileError(line, "inconsistent dedent");
@@ -108,13 +112,20 @@ std::vector<Token> lex(const std::string& src) {
             at_line_start = false;
             continue;
         }
+        
+        // NOW WE CAN ACTUALLY START THE LEX STUFF FOR CODE
 
+        // This is the case where there WAS some code stuff but 
+        // further in the same line theres more of that
+        // spaces, tabs or comment stuff in the middle
         char c = src[i];
         // Mid-line whitespace (tabs are only an error in indentation).
         if (c == ' ' || c == '\t') { i++; continue; }
+        // Comment, so ignore this whole part and the next iteration
+        // of the algo will hit the c == \n case
         if (c == '#') { while (i < n && src[i] != '\n') i++; continue; }
         if (c == '\n') {
-            push(Tok::Newline);
+            toks.push_back(Token{Tok::Newline, "", 0, line});
             line++;
             i++;
             at_line_start = true;
@@ -125,10 +136,13 @@ std::vector<Token> lex(const std::string& src) {
         // (Maximal munch for free — no flex-style rule-ordering trap.)
         if (is_ident_start(c)) {
             size_t start = i;
+            // this while loop right here is implementing the maximal munch part
+            // since it's greedily taking the longest string it can
             while (i < n && is_ident_part(src[i])) i++;
             std::string word = src.substr(start, i - start);
             auto it = kKeywords.find(word);
-            push(it != kKeywords.end() ? it->second : Tok::Ident, word);
+            Tok kind = (it != kKeywords.end()) ? it->second : Tok::Ident;
+            toks.push_back(Token{kind, word, 0, line});
             continue;
         }
 
@@ -150,31 +164,78 @@ std::vector<Token> lex(const std::string& src) {
         // munch (`<=` beats `<`, `//` beats `/`, `==` beats `=`).
         switch (c) {
             case '=':
-                if (peek(1) == '=') { push(Tok::EqEq);  i += 2; }
-                else                { push(Tok::Assign); i += 1; }
+                if (i + 1 < n && src[i + 1] == '=') {
+                    toks.push_back(Token{Tok::EqEq, "", 0, line});
+                    i += 2;
+                } else {
+                    toks.push_back(Token{Tok::Assign, "", 0, line});
+                    i += 1;
+                }
                 continue;
             case '!':
-                if (peek(1) == '=') { push(Tok::NotEq); i += 2; continue; }
+                if (i + 1 < n && src[i + 1] == '=') {
+                    toks.push_back(Token{Tok::NotEq, "", 0, line});
+                    i += 2;
+                    continue;
+                }
                 throw CompileError(line, "expected '=' after '!'");
             case '<':
-                if (peek(1) == '=') { push(Tok::Le); i += 2; }
-                else                { push(Tok::Lt); i += 1; }
+                if (i + 1 < n && src[i + 1] == '=') {
+                    toks.push_back(Token{Tok::Le, "", 0, line});
+                    i += 2;
+                } else {
+                    toks.push_back(Token{Tok::Lt, "", 0, line});
+                    i += 1;
+                }
                 continue;
             case '>':
-                if (peek(1) == '=') { push(Tok::Ge); i += 2; }
-                else                { push(Tok::Gt); i += 1; }
+                if (i + 1 < n && src[i + 1] == '=') {
+                    toks.push_back(Token{Tok::Ge, "", 0, line});
+                    i += 2;
+                } else {
+                    toks.push_back(Token{Tok::Gt, "", 0, line});
+                    i += 1;
+                }
                 continue;
             case '/':
-                if (peek(1) == '/') { push(Tok::SlashSlash); i += 2; continue; }
+                if (i + 1 < n && src[i + 1] == '/') {
+                    toks.push_back(Token{Tok::SlashSlash, "", 0, line});
+                    i += 2;
+                    continue;
+                }
                 throw CompileError(line, "single '/' is not an operator (use '//')");
-            case '+': push(Tok::Plus);    i++; continue;
-            case '-': push(Tok::Minus);   i++; continue;
-            case '*': push(Tok::Star);    i++; continue;
-            case '%': push(Tok::Percent); i++; continue;
-            case '(': push(Tok::LParen);  i++; continue;
-            case ')': push(Tok::RParen);  i++; continue;
-            case ',': push(Tok::Comma);   i++; continue;
-            case ':': push(Tok::Colon);   i++; continue;
+            case '+':
+                toks.push_back(Token{Tok::Plus, "", 0, line});
+                i++;
+                continue;
+            case '-':
+                toks.push_back(Token{Tok::Minus, "", 0, line});
+                i++;
+                continue;
+            case '*':
+                toks.push_back(Token{Tok::Star, "", 0, line});
+                i++;
+                continue;
+            case '%':
+                toks.push_back(Token{Tok::Percent, "", 0, line});
+                i++;
+                continue;
+            case '(':
+                toks.push_back(Token{Tok::LParen, "", 0, line});
+                i++;
+                continue;
+            case ')':
+                toks.push_back(Token{Tok::RParen, "", 0, line});
+                i++;
+                continue;
+            case ',':
+                toks.push_back(Token{Tok::Comma, "", 0, line});
+                i++;
+                continue;
+            case ':':
+                toks.push_back(Token{Tok::Colon, "", 0, line});
+                i++;
+                continue;
             default:
                 throw CompileError(line,
                     std::string("unexpected character '") + c + "'");
@@ -182,9 +243,12 @@ std::vector<Token> lex(const std::string& src) {
     }
 
     // EOF: close a dangling last line (no trailing '\n'), drain the stack.
-    if (!at_line_start) push(Tok::Newline);
-    while (indents.back() > 0) { indents.pop_back(); push(Tok::Dedent); }
-    push(Tok::Eof);
+    if (!at_line_start) toks.push_back(Token{Tok::Newline, "", 0, line});
+    while (indents.back() > 0) {
+        indents.pop_back();
+        toks.push_back(Token{Tok::Dedent, "", 0, line});
+    }
+    toks.push_back(Token{Tok::Eof, "", 0, line});
     return toks;
 }
 
