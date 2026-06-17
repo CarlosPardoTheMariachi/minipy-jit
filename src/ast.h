@@ -117,8 +117,7 @@ struct ExprStmt : Stmt {
 // else body at the end.
 struct IfStmt : Stmt {
     std::vector<std::pair<ExprPtr, Block>> branches;
-    Block else_body;
-    bool has_else = false;
+    Block else_body;   // empty means no else (blocks are never empty)
     explicit IfStmt(int ln) : Stmt(StmtKind::If, ln) {}
 };
 
