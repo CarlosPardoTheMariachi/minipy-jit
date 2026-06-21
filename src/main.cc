@@ -1,4 +1,4 @@
-// main.cc — driver.  Phase 2: --dump-tokens and --dump-ast exist so far.
+// main.cc — driver.  Phase 3: --dump-tokens, --dump-ast, and --interp exist.
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -7,6 +7,7 @@
 
 #include "ast.h"
 #include "error.h"
+#include "interp.h"
 #include "lexer.h"
 #include "parser.h"
 
@@ -38,11 +39,15 @@ int main(int argc, char** argv) {
     std::string path;
     bool opt_dump_tokens = false;
     bool opt_dump_ast = false;
+    bool opt_interp = false;
+    bool opt_time = false;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--dump-tokens") opt_dump_tokens = true;
         else if (a == "--dump-ast") opt_dump_ast = true;
+        else if (a == "--interp") opt_interp = true;
+        else if (a == "--time") opt_time = true;
         else if (!a.empty() && a[0] == '-') {
             std::cerr << "error: unknown flag " << a << "\n";
             return 1;
@@ -51,7 +56,7 @@ int main(int argc, char** argv) {
         }
     }
     if (path.empty()) {
-        std::cerr << "usage: minipy [--dump-tokens|--dump-ast] file.mp\n";
+        std::cerr << "usage: minipy [--dump-tokens|--dump-ast|--interp] [--time] file.mp\n";
         return 1;
     }
 
@@ -63,7 +68,10 @@ int main(int argc, char** argv) {
         minipy::Program prog = minipy::parse(toks);
         if (opt_dump_ast) { minipy::dump_ast(prog, std::cout); return 0; }
 
-        std::cerr << "error: only --dump-tokens and --dump-ast are implemented so far\n";
+        // The JIT doesn't exist yet, so the interpreter is the only engine.
+        if (opt_interp) return minipy::run_interpreter(prog, opt_time);
+
+        std::cerr << "error: no engine selected (try --interp); the JIT is not built yet\n";
         return 1;
     } catch (const minipy::CompileError& e) {
         std::cerr << path << ":" << e.line << ": error: " << e.what() << "\n";
