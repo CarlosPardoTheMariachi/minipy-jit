@@ -39,7 +39,12 @@ namespace {
 int64_t wrap_add(int64_t a, int64_t b) { return (int64_t)((uint64_t)a + (uint64_t)b); }
 int64_t wrap_sub(int64_t a, int64_t b) { return (int64_t)((uint64_t)a - (uint64_t)b); }
 int64_t wrap_mul(int64_t a, int64_t b) { return (int64_t)((uint64_t)a * (uint64_t)b); }
-int64_t wrap_neg(int64_t a)            { return (int64_t)(0u - (uint64_t)a); }
+int64_t wrap_neg(int64_t a) {
+    if (a == INT64_MIN) {
+        return INT64_MIN;   // -INT64_MIN doesn't fit; two's-complement wraps
+    }
+    return -a;
+}
 
 // C's / already truncates toward zero, which is exactly SDIV's behavior.
 // The two special cases are the divide instructions' edge semantics that
