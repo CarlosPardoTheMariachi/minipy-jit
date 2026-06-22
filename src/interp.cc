@@ -7,8 +7,9 @@
 // message + exit(1).
 //
 // NOTE: this file assumes sema's invariants (callee exists, arity matches,
-// print has exactly one arg).  Until sema lands, feeding it an invalid
-// program is undefined — the differential tests only use valid programs.
+// print has exactly one arg) — the driver runs sema before either engine, so
+// an invalid program never reaches here.  Slots are ignored on purpose: the
+// interpreter keeps its string-keyed frame, and the slots are for the JIT.
 #include "interp.h"
 
 #include <chrono>

@@ -1,4 +1,5 @@
-// main.cc — driver.  Phase 3: --dump-tokens, --dump-ast, and --interp exist.
+// main.cc — driver.  So far: --dump-tokens, --dump-ast, --interp, plus the
+// front-end pipeline lex -> parse -> sema.
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -10,6 +11,7 @@
 #include "interp.h"
 #include "lexer.h"
 #include "parser.h"
+#include "sema.h"
 
 namespace {
 
@@ -66,6 +68,11 @@ int main(int argc, char** argv) {
         if (opt_dump_tokens) { dump_tokens(toks); return 0; }
 
         minipy::Program prog = minipy::parse(toks);
+
+        // Before the dump, not after: sema annotates the AST with frame slots,
+        // and --dump-ast prints them, so running it first is what makes the
+        // dump show the resolution rather than a pile of -1s.
+        minipy::Sema(prog).run();
         if (opt_dump_ast) { minipy::dump_ast(prog, std::cout); return 0; }
 
         // The JIT doesn't exist yet, so the interpreter is the only engine.
