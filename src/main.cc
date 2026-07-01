@@ -1,5 +1,5 @@
-// main.cc — driver.  So far: --dump-tokens, --dump-ast, --interp, plus the
-// front-end pipeline lex -> parse -> sema.
+// main.cc — driver.  Runs the front end (lex -> parse -> sema), then either
+// dumps an intermediate form or hands the AST to one of the two engines.
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ast.h"
+#include "codegen.h"
 #include "error.h"
 #include "interp.h"
 #include "lexer.h"
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
     bool opt_dump_tokens = false;
     bool opt_dump_ast = false;
     bool opt_interp = false;
+    bool opt_disasm = false;
     bool opt_time = false;
 
     for (int i = 1; i < argc; i++) {
@@ -49,6 +51,8 @@ int main(int argc, char** argv) {
         if (a == "--dump-tokens") opt_dump_tokens = true;
         else if (a == "--dump-ast") opt_dump_ast = true;
         else if (a == "--interp") opt_interp = true;
+        else if (a == "--jit") opt_interp = false;   // the default anyway
+        else if (a == "--disasm") opt_disasm = true;
         else if (a == "--time") opt_time = true;
         else if (!a.empty() && a[0] == '-') {
             std::cerr << "error: unknown flag " << a << "\n";
@@ -58,7 +62,8 @@ int main(int argc, char** argv) {
         }
     }
     if (path.empty()) {
-        std::cerr << "usage: minipy [--dump-tokens|--dump-ast|--interp] [--time] file.mp\n";
+        std::cerr << "usage: minipy [--dump-tokens|--dump-ast|--interp|--jit|--disasm]"
+                     " [--time] file.mp\n";
         return 1;
     }
 
@@ -75,11 +80,17 @@ int main(int argc, char** argv) {
         minipy::Sema(prog).run();
         if (opt_dump_ast) { minipy::dump_ast(prog, std::cout); return 0; }
 
-        // The JIT doesn't exist yet, so the interpreter is the only engine.
-        if (opt_interp) return minipy::run_interpreter(prog, opt_time);
+        // Compile without running, and print what came out.  Useful on its
+        // own: when emitted code misbehaves, the first question is whether the
+        // instructions are the ones that were intended.
+        if (opt_disasm) {
+            minipy::CompiledCode code = minipy::compile_program(prog);
+            minipy::disasm(code, std::cout);
+            return 0;
+        }
 
-        std::cerr << "error: no engine selected (try --interp); the JIT is not built yet\n";
-        return 1;
+        if (opt_interp) return minipy::run_interpreter(prog, opt_time);
+        return minipy::run_jit(prog, opt_time);
     } catch (const minipy::CompileError& e) {
         std::cerr << path << ":" << e.line << ": error: " << e.what() << "\n";
         return 1;
