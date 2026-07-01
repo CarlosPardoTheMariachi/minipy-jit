@@ -70,11 +70,18 @@ int main() {
         e.cset(reg::X0, Cond::GE); e.ret();
         check("cmp+cset ge", e, 0);
     }
-    { // push/pop round-trip through sp: push 42, clobber x0, pop into x0
+    { // push/pop through sp.  Two DIFFERENT values popped in LIFO order, and
+      // the result is a subtraction rather than a sum: if the pre/post index
+      // went the wrong way the values come back swapped and the answer is -35.
+      // A push/pop of one value would pass either way, since a bug shared by
+      // both directions cancels itself out.
         Emitter e;
         e.movz(reg::X0,42,0); e.str_pre(reg::X0, reg::SP, -16);
-        e.movz(reg::X0,7,0);  e.ldr_post(reg::X0, reg::SP, 16); e.ret();
-        check("push/pop", e, 42);
+        e.movz(reg::X0,7,0);  e.str_pre(reg::X0, reg::SP, -16);
+        e.ldr_post(reg::X1, reg::SP, 16);    // last pushed -> 7
+        e.ldr_post(reg::X2, reg::SP, 16);    // first pushed -> 42
+        e.sub_reg(reg::X0, reg::X2, reg::X1); e.ret();
+        check("push/pop", e, 35);
     }
     { // add_imm / sub_imm on a GP reg
         Emitter e; e.movz(reg::X0,40,0); e.add_imm(reg::X0,reg::X0,10); e.sub_imm(reg::X0,reg::X0,8); e.ret();
@@ -129,14 +136,30 @@ int main() {
         e.bind(skip); e.ret();
         check("b.cond not taken", e, 42);
     }
-    { // stp/ldp round trip like the frame prologue: push x0/x1 pair, restore
+    { // stp field order, checked with a single-register load instead of a
+      // matching ldp.  Rt must land at the LOWER address, so reading [sp,#0]
+      // has to give 42; if Rt/Rt2 were swapped it gives 7.  Checking stp with
+      // ldp instead would prove nothing — the load would take the values back
+      // out of the same wrong slots the store put them in.
         Emitter e;
         e.movz(reg::X0, 42, 0); e.movz(reg::X1, 7, 0);
         e.stp_pre(reg::X0, reg::X1, reg::SP, -16);   // [sp,#-16]!
+        e.ldur(reg::X0, reg::SP, 0);                 // lower half of the pair
+        e.ldp_post(reg::X1, reg::X2, reg::SP, 16);   // only to put sp back
+        e.ret();
+        check("stp field order", e, 42);
+    }
+    { // ldp field order, checked against stores that were placed one at a
+      // time.  x0 must come from the lower address (42) and x1 from the upper
+      // (7); the subtraction turns a swap into -35 instead of a passing 35.
+        Emitter e;
+        e.sub_imm(reg::SP, reg::SP, 16);
+        e.movz(reg::X0, 42, 0); e.stur(reg::X0, reg::SP, 0);
+        e.movz(reg::X0, 7, 0);  e.stur(reg::X0, reg::SP, 8);
         e.movz(reg::X0, 0, 0);  e.movz(reg::X1, 0, 0);
-        e.ldp_post(reg::X0, reg::X1, reg::SP, 16);   // [sp],#16
-        e.add_reg(reg::X0, reg::X0, reg::X1); e.ret();
-        check("stp/ldp pair", e, 49);
+        e.ldp_post(reg::X0, reg::X1, reg::SP, 16);
+        e.sub_reg(reg::X0, reg::X0, reg::X1); e.ret();
+        check("ldp field order", e, 35);
     }
 
     std::printf("emit_smoke: %s\n", failures ? "FAILURES" : "all passed");
