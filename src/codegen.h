@@ -25,6 +25,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ast.h"
@@ -32,14 +34,20 @@
 
 namespace minipy {
 
-// The finished machine code, plus the two things a caller needs to use it.
+// The finished machine code, plus the things a caller needs to use it.
 struct CompiledCode {
     std::vector<uint8_t> bytes;
 
     // Where __main__ starts, in bytes from the front of the buffer.  Functions
     // are emitted in source order, so this is generally not 0, and the entry
-    // point is base() + entry_offset rather than base().
+    // point is base() + entry_offset rather than base().  Left at 0 when
+    // __main__ wasn't among the functions compiled.
     size_t entry_offset = 0;
+
+    // Where every compiled function starts, by name.  Compiling the whole
+    // program only ever needs entry_offset, but tiering enters the buffer at
+    // whichever function went hot, so it needs all of them.
+    std::unordered_map<std::string, size_t> offsets;
 
     // The mnemonic record kept while emitting, for --disasm.
     std::vector<Emitter::Line> listing;
@@ -50,6 +58,17 @@ struct CompiledCode {
 // function defined later in the file — or to the function currently being
 // compiled — resolve to a real displacement at finalize time.
 CompiledCode compile_program(const Program& prog);
+
+// Compile just these functions into one buffer.  Used by tiering, which
+// compiles a hot function together with everything it can reach rather than
+// the whole program.
+//
+// The caller owes one guarantee: the set must be closed under calling.  A BL
+// can only target a label in this same buffer, so if anything in the set calls
+// a function outside it there is nothing to branch to.  Being closed is also
+// what makes tiering cheap here — every call inside the region stays a plain
+// BL, with no patchable stub to route back out to the interpreter.
+CompiledCode compile_functions(const std::vector<const FuncDef*>& funcs);
 
 // Compile, map the code as executable, and call __main__.  Returns the process
 // exit code.  With time_it, prints compile and run times to stderr as separate

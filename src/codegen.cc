@@ -60,7 +60,7 @@ Cond cond_for(BinOp op) {
 
 class Codegen {
 public:
-    explicit Codegen(const Program& prog) : prog_(prog) {}
+    explicit Codegen(const std::vector<const FuncDef*>& funcs) : funcs_(funcs) {}
 
     CompiledCode compile();
 
@@ -91,7 +91,11 @@ private:
     Label div_zero_label();
 
     Emitter em_;
-    const Program& prog_;
+
+    // The functions to emit, which may be the whole program or just the part
+    // of it that went hot.  Either way the set has to be closed under calling,
+    // because a BL can only reach a label in this same buffer.
+    const std::vector<const FuncDef*>& funcs_;
 
     // Every function's label, all created before any body is emitted.  This is
     // the two-pass shape CgenClassTable used for class layouts, and it is what
@@ -453,7 +457,8 @@ void Codegen::gen_function(const FuncDef& fn) {
     gen_block(fn.body);
 
     // Reached only by falling off the end of the body, which the language says
-    // returns 0.  A function that ends in `return` jumps over this.
+    // returns 0.  A function that ends in `return` jumps over this so this
+    // will never run for such function
     em_.movz(reg::X0, 0, 0);
 
     em_.bind(return_label_);
@@ -464,14 +469,19 @@ CompiledCode Codegen::compile() {
     // Pass 1: a label for every function, before a single instruction exists.
     // Nothing is emitted here; this only makes the names referenceable, which
     // is what a call to a not-yet-compiled function needs.
-    for (const auto& fn : prog_.funcs) {
+    for (const FuncDef* fn : funcs_) {
         func_labels_[fn->name] = em_.new_label();
     }
 
     // Pass 2: the bodies, in source order.
     CompiledCode out;
-    for (const auto& fn : prog_.funcs) {
+    for (const FuncDef* fn : funcs_) {
+        // Recorded for every function, not just __main__: tiering enters the
+        // buffer at whichever one went hot.
+        out.offsets[fn->name] = em_.here();
         if (fn->name == kMainFunc) {
+            // Saved because the caller lives outside the buffer and needs an
+            // absolute address, which only exists as base() + this offset.
             out.entry_offset = em_.here();
         }
         gen_function(*fn);
@@ -496,7 +506,18 @@ CompiledCode Codegen::compile() {
 }  // namespace
 
 CompiledCode compile_program(const Program& prog) {
-    return Codegen(prog).compile();
+    // The whole program is trivially closed under calling — sema already
+    // rejected any call to a function that doesn't exist.
+    std::vector<const FuncDef*> all;
+    all.reserve(prog.funcs.size());
+    for (const auto& fn : prog.funcs) {
+        all.push_back(fn.get());
+    }
+    return Codegen(all).compile();
+}
+
+CompiledCode compile_functions(const std::vector<const FuncDef*>& funcs) {
+    return Codegen(funcs).compile();
 }
 
 int run_jit(const Program& prog, bool time_it) {
