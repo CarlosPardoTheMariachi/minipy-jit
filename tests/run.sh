@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run.sh — differential test runner.  For every tests/*.mp:
-#   1. run under --interp and --jit
+#   1. run under --interp, --jit, and --tier
 #   2. assert stdout, stderr, and exit status are byte-identical between them
 #   3. assert stdout/stderr/exit match the embedded golden:
 #        # expect: <stdout line>
@@ -28,6 +28,10 @@ for f in tests/*.mp; do
 
     "$BIN" --interp "$f" >"$TMP/io" 2>"$TMP/ie"; ic=$?
     "$BIN" --jit    "$f" >"$TMP/jo" 2>"$TMP/je"; jc=$?
+    # --hot=2 so even a test that calls a function twice crosses into compiled
+    # code.  At the default threshold these programs are all far too short to
+    # promote anything, and the boundary would never get exercised.
+    "$BIN" --tier --hot=2 "$f" >"$TMP/to" 2>"$TMP/te"; tc=$?
 
     # Golden expectations extracted from the source comments.
     grep '^# expect: '        "$f" | sed 's/^# expect: //'        >"$TMP/exp_out"
@@ -39,6 +43,9 @@ for f in tests/*.mp; do
     if ! diff -q "$TMP/io" "$TMP/jo" >/dev/null; then ok=0; why="stdout interp!=jit"; fi
     if ! diff -q "$TMP/ie" "$TMP/je" >/dev/null; then ok=0; why="stderr interp!=jit"; fi
     if [ "$ic" != "$jc" ]; then ok=0; why="exit interp($ic)!=jit($jc)"; fi
+    if ! diff -q "$TMP/io" "$TMP/to" >/dev/null; then ok=0; why="stdout interp!=tier"; fi
+    if ! diff -q "$TMP/ie" "$TMP/te" >/dev/null; then ok=0; why="stderr interp!=tier"; fi
+    if [ "$ic" != "$tc" ]; then ok=0; why="exit interp($ic)!=tier($tc)"; fi
     if ! diff -q "$TMP/exp_out" "$TMP/io" >/dev/null; then ok=0; why="stdout!=golden"; fi
     if [ -s "$TMP/exp_err" ] && ! diff -q "$TMP/exp_err" "$TMP/ie" >/dev/null; then ok=0; why="stderr!=golden"; fi
     if [ "$ic" != "$exp_exit" ]; then ok=0; why="exit($ic)!=golden($exp_exit)"; fi
