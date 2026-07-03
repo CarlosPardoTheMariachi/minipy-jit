@@ -2,6 +2,7 @@
 // dumps an intermediate form or hands the AST to one of the two engines.
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -42,16 +43,33 @@ int main(int argc, char** argv) {
     std::string path;
     bool opt_dump_tokens = false;
     bool opt_dump_ast = false;
-    bool opt_interp = false;
+    // Which engine to run.  Three of them now, and they must all produce
+    // byte-identical output — that is what the differential tests check.
+    enum class Engine { Jit, Interp, Tier };
+    Engine engine = Engine::Jit;
+
     bool opt_disasm = false;
     bool opt_time = false;
+
+    // How many calls a function may make before tiering compiles it.  Low
+    // enough that anything genuinely repetitive trips it early, high enough
+    // that a handful of calls during startup doesn't.
+    int hot_threshold = 100;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--dump-tokens") opt_dump_tokens = true;
         else if (a == "--dump-ast") opt_dump_ast = true;
-        else if (a == "--interp") opt_interp = true;
-        else if (a == "--jit") opt_interp = false;   // the default anyway
+        else if (a == "--interp") engine = Engine::Interp;
+        else if (a == "--jit") engine = Engine::Jit;   // the default anyway
+        else if (a == "--tier") engine = Engine::Tier;
+        else if (a.rfind("--hot=", 0) == 0) {
+            hot_threshold = std::atoi(a.substr(6).c_str());
+            if (hot_threshold < 1) {
+                std::cerr << "error: --hot= needs a positive number\n";
+                return 1;
+            }
+        }
         else if (a == "--disasm") opt_disasm = true;
         else if (a == "--time") opt_time = true;
         else if (!a.empty() && a[0] == '-') {
@@ -62,8 +80,8 @@ int main(int argc, char** argv) {
         }
     }
     if (path.empty()) {
-        std::cerr << "usage: minipy [--dump-tokens|--dump-ast|--interp|--jit|--disasm]"
-                     " [--time] file.mp\n";
+        std::cerr << "usage: minipy [--dump-tokens|--dump-ast|--interp|--jit|--tier|--disasm]"
+                     " [--hot=N] [--time] file.mp\n";
         return 1;
     }
 
@@ -89,7 +107,8 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        if (opt_interp) return minipy::run_interpreter(prog, opt_time);
+        if (engine == Engine::Interp) return minipy::run_interpreter(prog, opt_time);
+        if (engine == Engine::Tier) return minipy::run_tiered(prog, hot_threshold, opt_time);
         return minipy::run_jit(prog, opt_time);
     } catch (const minipy::CompileError& e) {
         std::cerr << path << ":" << e.line << ": error: " << e.what() << "\n";

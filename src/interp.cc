@@ -20,6 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "tiering.h"
+
 namespace minipy {
 
 namespace {
@@ -81,7 +83,11 @@ enum class Flow { Normal, Return };
 
 class Interpreter {
 public:
-    explicit Interpreter(const Program& prog) {
+    // tiers may be null, which is the pure-interpreter case and the one the
+    // differential tests treat as the oracle.  When it isn't null this is still
+    // the same interpreter — the only difference is that some calls stop
+    // walking the tree and jump into machine code instead.
+    Interpreter(const Program& prog, TierManager* tiers) : tiers_(tiers) {
         for (const auto& fn : prog.funcs) {
             funcs_[fn->name] = fn.get();
         }
@@ -99,6 +105,22 @@ public:
 
 private:
     int64_t call(const FuncDef* fn, const std::vector<int64_t>& args) {
+        // Mixed mode: ask whether this function has gone hot.  If it has, the
+        // whole call runs as machine code and nothing below this executes —
+        // including, crucially, any recursion inside it, which stays entirely
+        // in the compiled buffer instead of coming back through here.
+        //
+        // Note where this sits: a call already in progress cannot be promoted,
+        // because by the time control is inside the loop below there is an
+        // interpreter frame that would have to be rebuilt as a machine frame.
+        // Only the *next* call gets the compiled version.
+        if (tiers_ != nullptr) {
+            void* entry = tiers_->on_call(fn);
+            if (entry != nullptr) {
+                return TierManager::invoke(entry, args);
+            }
+        }
+
         // Fresh frame per call — this is what makes recursion work: each
         // recursive call gets its own copy of the locals.
         Frame frame;
@@ -257,6 +279,7 @@ private:
     }
 
     std::unordered_map<std::string, const FuncDef*> funcs_;
+    TierManager* tiers_;
 };
 
 }  // namespace
@@ -264,11 +287,32 @@ private:
 int run_interpreter(const Program& prog, bool time_it) {
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
-    int rc = Interpreter(prog).run();
+    int rc = Interpreter(prog, nullptr).run();
     auto t1 = clock::now();
     if (time_it) {
         std::fprintf(stderr, "interp run_ms=%.3f\n",
                      std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
+    return rc;
+}
+
+int run_tiered(const Program& prog, int threshold, bool time_it) {
+    using clock = std::chrono::steady_clock;
+    TierManager tiers(prog, threshold);
+
+    auto t0 = clock::now();
+    int rc = Interpreter(prog, &tiers).run();
+    auto t1 = clock::now();
+
+    if (time_it) {
+        // compile_ms is reported separately but is NOT disjoint from run_ms
+        // the way it is under --jit: compilation happens partway through the
+        // run, so its cost is already inside the total.  Printed anyway
+        // because the interesting question about tiering is how small it is.
+        std::fprintf(stderr, "tier compile_ms=%.3f\n", tiers.compile_ms());
+        std::fprintf(stderr, "tier run_ms=%.3f\n",
+                     std::chrono::duration<double, std::milli>(t1 - t0).count());
+        std::fprintf(stderr, "tier compiled_funcs=%d\n", tiers.compiled_count());
     }
     return rc;
 }

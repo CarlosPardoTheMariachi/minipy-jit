@@ -15,6 +15,12 @@ namespace minipy {
 // If time_it, prints "interp run_ms=..." to stderr for the benchmark harness.
 int run_interpreter(const Program& prog, bool time_it = false);
 
+// Run it in mixed mode: interpret, but compile any function called at least
+// `threshold` times and use the compiled version for every later call.  Same
+// observable behavior as the other two engines — that is the whole contract,
+// and it is what the differential tests check.
+int run_tiered(const Program& prog, int threshold, bool time_it = false);
+
 }  // namespace minipy
 
 #endif  // MINIPY_INTERP_H
